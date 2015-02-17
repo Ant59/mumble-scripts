@@ -1,8 +1,10 @@
+
 #!/usr/bin/env python
 # -*- coding: utf-8
 
-# Copyright (C) 2010 Stefan Hacker <dd0t@users.sourceforge.net>
-# All rights reserved.
+# Elkarte modification Copyright (C) 2015 Antony Derham <antony@xydre.com>
+#
+# Original work Copyright (C) 2010 Stefan Hacker <dd0t@users.sourceforge.net>
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,14 +32,15 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #
-#    smfauth.py - Authenticator implementation for password authenticating
-#                 a Murmur server against a SMF forum database
+#    elkarteauth.py - Authenticator implementation for password authenticating
+#                 a Murmur server against a Elkarte forum database
 #
 #    Requirements:
 #        * python >=2.4 and the following python modules:
 #            * ice-python
 #            * MySQLdb
 #            * daemon (when run as a daemon)
+#            * bcrypt
 #
 
 import sys
@@ -46,6 +49,8 @@ import thread
 import urllib2
 import logging
 import ConfigParser
+import bcrypt
+import hashlib
 
 from threading  import Timer
 from optparse   import OptionParser
@@ -56,11 +61,6 @@ from logging    import (debug,
                         critical,
                         exception,
                         getLogger)
-
-try:
-    from hashlib import sha1
-except ImportError: # python 2.4 compat
-    from sha import sha as sha1
 
 def x2bool(s):
     """Helper function to convert strings from the config to bool"""
@@ -489,7 +489,7 @@ def do_main_program():
             
             try:
                 sql = 'SELECT id_member, passwd, id_group, member_name, real_name, additional_groups, is_activated FROM %smembers WHERE LOWER(member_name) = LOWER(%%s)' % cfg.database.prefix
-                cur = threadDB.execute(sql, name)
+                cur = threadDB.execute(sql, [name])
             except threadDbException:
                 return (FALL_THROUGH, None, None)
             
@@ -551,7 +551,7 @@ def do_main_program():
             
             try:
                 sql = 'SELECT id_member FROM %smembers WHERE LOWER(member_name) = LOWER(%%s)' % cfg.database.prefix
-                cur = threadDB.execute(sql, name)
+                cur = threadDB.execute(sql, [name])
             except threadDbException:
                 return FALL_THROUGH
             
@@ -580,7 +580,7 @@ def do_main_program():
             # Fetch the user from the database
             try:
                 sql = 'SELECT member_name FROM %smembers WHERE id_member = %%s' % cfg.database.prefix
-                cur = threadDB.execute(sql, bbid)
+                cur = threadDB.execute(sql, [bbid])
             except threadDbException:
                 return FALL_THROUGH
             
@@ -615,7 +615,7 @@ def do_main_program():
             bbid = id - cfg.user.id_offset
             try:
                 sql = 'SELECT avatar FROM %smembers WHERE id_member = %%s' % cfg.database.prefix
-                cur = threadDB.execute(sql, bbid)
+                cur = threadDB.execute(sql, [bbid])
             except threadDbException:
                 return FALL_THROUGH
             res = cur.fetchone()
@@ -630,7 +630,7 @@ def do_main_program():
                 try:
                     sql = '''SELECT id_attach, file_hash, filename, attachment_type FROM %sattachments WHERE approved = true AND
                         (attachment_type = 0 OR attachment_type = 1) AND id_member = %%s''' % cfg.database.prefix
-                    cur = threadDB.execute(sql, bbid)
+                    cur = threadDB.execute(sql, [bbid])
                 except threadDbException:
                     return FALL_THROUGH
                 
@@ -660,7 +660,7 @@ def do_main_program():
                 return self.texture_cache[avatar_file]
             
             try:
-                handle = urllib2.urlopen(avatar_file)
+                handle = urllib2.urlopen(urllib2.Request(avatar_file, headers={'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.0.7) Gecko/2009021910 Firefox/3.0.7'}))
                 filecontent = handle.read()
                 handle.close()
             except urllib2.URLError, e:
@@ -708,7 +708,7 @@ def do_main_program():
             
             try:
                 sql = 'SELECT id_member, member_name FROM %smembers WHERE is_activated = 1 AND member_name LIKE %%s' % cfg.database.prefix
-                cur = threadDB.execute(sql, filter)
+                cur = threadDB.execute(sql, [filter])
             except threadDbException:
                 return {}
     
@@ -804,7 +804,8 @@ def smf_check_hash(password, hash, username):
     """
     Python implementation of the smf check hash function
     """
-    return sha1(username.lower().encode('utf8') + password).hexdigest() == hash
+    pass256 = hashlib.sha256(username.lower().encode('utf-8') + password).hexdigest()
+    return bcrypt.hashpw(pass256, hash.encode('utf-8')) == hash
 
 #
 #--- Start of program
